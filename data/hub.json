@@ -1,0 +1,9 @@
+{
+  "categories": [
+    { "id": "keyword", "name": "Keyword", "color": "#6366f1" },
+    { "id": "style", "name": "Style", "color": "#ec4899" },
+    { "id": "trend", "name": "Trend", "color": "#f59e0b" },
+    { "id": "brand", "name": "Brand", "color": "#10b981" }
+  ],
+  "items": []
+}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ref Hub">
+<meta name="theme-color" content="#111111">
+<title>Ref Hub</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <button id="menuBtn" class="icon-btn only-mobile" aria-label="Filters">☰</button>
+  <h1>Ref Hub</h1>
+  <input id="search" type="search" placeholder="Search title, notes, tags…" autocomplete="off">
+  <button id="addBtn" class="btn primary">+ Add</button>
+  <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙</button>
+</header>
+
+<div class="layout">
+  <aside id="sidebar">
+    <div class="side-head">
+      <strong>Filters</strong>
+      <button id="clearFilters" class="link">Clear</button>
+    </div>
+    <div id="filters"></div>
+    <button id="manageCats" class="btn small">Manage categories</button>
+  </aside>
+  <main>
+    <div id="status" class="status"></div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" hidden></div>
+  </main>
+</div>
+
+<div id="scrim" class="scrim" hidden></div>
+<div id="modal" class="modal" hidden><div class="sheet" id="sheet"></div></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
