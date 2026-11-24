@@ -386,20 +386,34 @@ load();
 const dropHint = h('div', { style: 'position:fixed;inset:12px;z-index:40;border:3px dashed var(--accent);border-radius:20px;background:#0008;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;pointer-events:none', hidden: true }, 'Drop images to add them');
 document.body.append(dropHint);
 let dragDepth = 0;
-const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+const hasDrag = (e) => { const t = [...(e.dataTransfer?.types || [])]; return t.includes('Files') || t.includes('text/uri-list') || t.includes('text/html'); };
 function handleFiles(files) {
   const imgs = [...files].filter((f) => f.type.startsWith('image/'));
   if (!imgs.length) return toast('Those aren’t images');
   if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
   imgs.length > 1 ? openBatch(imgs) : openEditor(null, imgs[0]);
 }
-window.addEventListener('dragenter', (e) => { if (hasFiles(e) && $('#modal').hidden) { dragDepth++; dropHint.hidden = false; } });
-window.addEventListener('dragleave', (e) => { if (hasFiles(e) && dragDepth > 0 && --dragDepth === 0) dropHint.hidden = true; });
-window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+// Images dragged from another web page arrive as a URL, not a file.
+async function handleDropData(dt) {
+  if (dt.files && dt.files.length) return handleFiles(dt.files);
+  let url = (dt.getData('text/uri-list') || '').split('\n').find((l) => l && !l.startsWith('#'));
+  const html = dt.getData('text/html');
+  if (html) { const m = html.match(/<img[^>]+src=["']([^"']+)["']/i); if (m) url = m[1].replace(/&amp;/g, '&'); }
+  if (!url || !/^https?:/i.test(url)) return toast('Drop an image file or an image from a web page');
+  try {
+    toast('Fetching image…', 8000);
+    const r = await fetch(url); if (!r.ok) throw new Error(r.status);
+    const blob = await r.blob(); if (!blob.type.startsWith('image/')) throw new Error('not an image');
+    handleFiles([new File([blob], 'dropped', { type: blob.type })]);
+  } catch (e) { toast('That site blocks copying images. Save the image first, then drop the file.', 6000); }
+}
+window.addEventListener('dragenter', (e) => { if (hasDrag(e) && $('#modal').hidden) { dragDepth++; dropHint.hidden = false; } });
+window.addEventListener('dragleave', (e) => { if (hasDrag(e) && dragDepth > 0 && --dragDepth === 0) dropHint.hidden = true; });
+window.addEventListener('dragover', (e) => { if (hasDrag(e)) e.preventDefault(); });
 window.addEventListener('drop', (e) => {
-  if (!hasFiles(e)) return;
+  if (!hasDrag(e)) return;
   e.preventDefault(); dragDepth = 0; dropHint.hidden = true;
-  if ($('#modal').hidden) handleFiles(e.dataTransfer.files);
+  if ($('#modal').hidden) handleDropData(e.dataTransfer);
 });
 document.addEventListener('paste', (e) => {
   if ($('#modal').hidden && !/INPUT|TEXTAREA/.test(document.activeElement?.tagName) && e.clipboardData?.files?.length) handleFiles(e.clipboardData.files);
