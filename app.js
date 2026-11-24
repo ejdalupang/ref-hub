@@ -180,15 +180,19 @@ function tagEditor(cat, initial) {
   const sugg = h('div', { class: 'sugg' });
   const freq = {};
   hub.items.forEach((it) => itemTags(it, cat.id).forEach((v) => (freq[v] = (freq[v] || 0) + 1)));
-  function draw() {
-    box.replaceChildren(...values.map((v) => h('span', { class: 'chip', style: `--c:${cat.color}` }, v, h('span', { class: 'x', onclick: () => { values.splice(values.indexOf(v), 1); draw(); } }, '×'))), input);
+  function drawSugg() {
     const q = input.value.trim().toLowerCase();
     const options = Object.keys(freq).filter((v) => !values.includes(v) && v.toLowerCase().includes(q)).sort((a, b) => freq[b] - freq[a]).slice(0, 10);
     sugg.replaceChildren(...options.map((v) => h('button', { type: 'button', class: 'chip', onclick: () => { values.push(v); input.value = ''; draw(); input.focus(); } }, v)));
   }
+  // Only rebuild the chips when they change; re-attaching the input on every keystroke would steal focus.
+  function draw() {
+    box.replaceChildren(...values.map((v) => h('span', { class: 'chip', style: `--c:${cat.color}` }, v, h('span', { class: 'x', onclick: () => { values.splice(values.indexOf(v), 1); draw(); input.focus(); } }, '×'))), input);
+    drawSugg();
+  }
   function commit() { const v = input.value.replace(/,/g, '').trim(); if (v && !values.some((x) => x.toLowerCase() === v.toLowerCase())) values.push(v); input.value = ''; draw(); }
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); input.focus(); } else if (e.key === 'Backspace' && !input.value && values.length) { values.pop(); draw(); input.focus(); } });
-  input.addEventListener('input', draw);
+  input.addEventListener('input', drawSugg);
   input.addEventListener('blur', () => { if (input.value.trim()) commit(); });
   draw();
   return { el: h('div', {}, h('label', {}, cat.name), box, sugg), get: () => { if (input.value.trim()) commit(); return values; } };
