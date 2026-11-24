@@ -210,9 +210,10 @@ function openEditor(existing) {
   const isNew = !existing;
   const it = existing || { tags: {} };
   const preview = h('img', { class: 'preview', hidden: isNew, src: isNew ? '' : it.image });
-  const fileIn = h('input', { type: 'file', accept: 'image/*', hidden: true });
-  const drop = h('div', { class: 'drop' }, 'Tap to choose an image, drop one here, or paste (⌘/Ctrl+V)');
-  async function setFile(f) {
+  const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: isNew, hidden: true });
+  const drop = h('div', { class: 'drop' }, 'Tap to choose image(s) — select several for a batch — or drop / paste here');
+  async function setFile(f, all) {
+    if (isNew && all && all.filter((x) => x.type.startsWith('image/')).length > 1) { document.removeEventListener('paste', onPaste); return openBatch(all.filter((x) => x.type.startsWith('image/'))); }
     if (!f || !f.type.startsWith('image/')) return;
     drop.textContent = 'Processing…';
     blob = await toJpegBlob(f);
@@ -221,11 +222,11 @@ function openEditor(existing) {
     preview.src = previewUrl; preview.hidden = false; drop.textContent = 'Change image';
   }
   drop.onclick = () => fileIn.click();
-  fileIn.onchange = () => setFile(fileIn.files[0]);
+  fileIn.onchange = () => setFile(fileIn.files[0], [...fileIn.files]);
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
   drop.ondragleave = () => drop.classList.remove('over');
-  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); setFile(e.dataTransfer.files[0]); };
-  const onPaste = (e) => { const f = [...(e.clipboardData?.files || [])][0]; if (f) setFile(f); };
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); setFile(e.dataTransfer.files[0], [...e.dataTransfer.files]); };
+  const onPaste = (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs[0]) setFile(fs[0], fs); };
   document.addEventListener('paste', onPaste);
 
   const title = h('input', { type: 'text', value: it.title || '', placeholder: 'Optional title' });
@@ -255,6 +256,49 @@ function openEditor(existing) {
   openModal(h('h2', {}, isNew ? 'Add reference' : 'Edit reference'), preview, drop, fileIn,
     h('label', {}, 'Title'), title, h('label', {}, 'Source link'), source, h('label', {}, 'Notes'), note,
     editors.map((x) => x.ed.el),
+    h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
+}
+
+function openBatch(files) {
+  let list = files.map((f) => ({ f, url: URL.createObjectURL(f) }));
+  const grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:8px' });
+  const count = h('div', { class: 'help' });
+  function drawThumbs() {
+    count.textContent = `${list.length} image${list.length === 1 ? '' : 's'} — the tags below apply to all of them`;
+    grid.replaceChildren(...list.map((x) => h('div', { style: 'position:relative' },
+      h('img', { src: x.url, style: 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block' }),
+      h('button', { class: 'icon-btn', style: 'position:absolute;top:2px;right:2px;background:#000a;color:#fff;border-radius:50%;width:22px;height:22px;font-size:13px;padding:0', onclick: () => { list = list.filter((y) => y !== x); drawThumbs(); } }, '×'))));
+  }
+  drawThumbs();
+  const source = h('input', { type: 'url', placeholder: 'https://… (optional, same for all)' });
+  const editors = hub.categories.map((c) => ({ c, ed: tagEditor(c, []) }));
+  const bar = h('div', { style: 'height:6px;background:var(--chip);border-radius:3px;overflow:hidden;margin-top:12px', hidden: true }, h('div', { style: 'height:100%;width:0;background:var(--accent);transition:width .2s' }));
+  const saveBtn = h('button', { class: 'btn primary' }, 'Upload all');
+  const done = () => { list.forEach((x) => URL.revokeObjectURL(x.url)); closeModal(); };
+  saveBtn.onclick = async () => {
+    if (!list.length) return toast('No images selected');
+    saveBtn.disabled = true; bar.hidden = false;
+    const tags = {};
+    editors.forEach(({ c, ed }) => { const v = ed.get(); if (v.length) tags[c.id] = v; });
+    const added = []; let failed = 0;
+    for (let i = 0; i < list.length; i++) {
+      saveBtn.textContent = `Uploading ${i + 1} of ${list.length}…`;
+      try {
+        const id = uid(); const path = `images/${id}.jpg`;
+        await putFile(path, await blobToB64(await toJpegBlob(list[i].f)), 'Add image ' + id);
+        added.push({ id, image: path, added: new Date(Date.now() + i).toISOString(), title: '', source: source.value.trim(), note: '', tags: JSON.parse(JSON.stringify(tags)) });
+      } catch (e) {
+        if (e.status === 401 || e.status === 403 || e.status === 404) { openSettings('GitHub rejected the token (' + e.status + ').'); return; }
+        failed++;
+      }
+      bar.firstChild.style.width = Math.round(((i + 1) / list.length) * 100) + '%';
+    }
+    try {
+      if (added.length) await mutate((d) => { d.items.push(...added); }, `Add ${added.length} references`);
+      done(); toast(failed ? `Added ${added.length}, ${failed} failed` : `Added ${added.length} ✓`, 4000);
+    } catch (e) { saveBtn.disabled = false; saveBtn.textContent = 'Retry'; toast('Save failed: ' + e.message, 4000); }
+  };
+  openModal(h('h2', {}, 'Batch add'), count, grid, h('label', {}, 'Source link'), source, editors.map((x) => x.ed.el), bar,
     h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
 }
 
