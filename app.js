@@ -190,9 +190,9 @@ function tagEditor(cat, initial) {
     box.replaceChildren(...values.map((v) => h('span', { class: 'chip', style: `--c:${cat.color}` }, v, h('span', { class: 'x', onclick: () => { values.splice(values.indexOf(v), 1); draw(); input.focus(); } }, '×'))), input);
     drawSugg();
   }
-  function commit() { const v = input.value.replace(/,/g, '').trim(); if (v && !values.some((x) => x.toLowerCase() === v.toLowerCase())) values.push(v); input.value = ''; draw(); }
+  function commit() { input.value.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean).forEach((v) => { if (!values.some((x) => x.toLowerCase() === v.toLowerCase())) values.push(v); }); input.value = ''; draw(); }
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); input.focus(); } else if (e.key === 'Backspace' && !input.value && values.length) { values.pop(); draw(); input.focus(); } });
-  input.addEventListener('input', drawSugg);
+  input.addEventListener('input', () => { if (/[,;\n]/.test(input.value)) { commit(); input.focus(); } else drawSugg(); });
   input.addEventListener('blur', () => { if (input.value.trim()) commit(); });
   draw();
   return { el: h('div', {}, h('label', {}, cat.name), box, sugg), get: () => { if (input.value.trim()) commit(); return values; } };
