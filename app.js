@@ -204,17 +204,19 @@ async function toJpegBlob(file, max = 1600) {
 }
 const blobToB64 = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(blob); });
 
-function openEditor(existing, initialFile) {
+const isImg = (f) => f.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|avif|bmp|heic|heif|svg)$/i.test(f.name);
+function openEditor(existing, initialFile, opts = {}) {
   if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
   let blob = null, previewUrl = null;
   const isNew = !existing;
-  const it = existing || { tags: {} };
+  const wiz = !!opts.total;
+  const it = existing || { tags: opts.tags ? JSON.parse(JSON.stringify(opts.tags)) : {}, source: opts.source || '' };
   const preview = h('img', { class: 'preview', hidden: isNew, src: isNew ? '' : it.image });
   const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: isNew, hidden: true });
-  const drop = h('div', { class: 'drop' }, 'Tap to choose image(s) — select several for a batch — or drop / paste here');
+  const drop = h('div', { class: 'drop', hidden: wiz }, 'Tap to choose image(s) — select several for a batch — or drop / paste here');
   async function setFile(f, all) {
-    if (isNew && all && all.filter((x) => x.type.startsWith('image/')).length > 1) { document.removeEventListener('paste', onPaste); return openBatch(all.filter((x) => x.type.startsWith('image/'))); }
-    if (!f || !f.type.startsWith('image/')) return;
+    if (isNew && !wiz && all && all.filter(isImg).length > 1) { document.removeEventListener('paste', onPaste); return openBatch(all.filter(isImg)); }
+    if (!f || !isImg(f)) return;
     drop.textContent = 'Processing…';
     try { blob = await toJpegBlob(f); } catch (e) { drop.textContent = 'Could not read that image (HEIC isn’t supported in this browser — export as JPG/PNG)'; return; }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -227,14 +229,16 @@ function openEditor(existing, initialFile) {
   drop.ondragleave = () => drop.classList.remove('over');
   drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); setFile(e.dataTransfer.files[0], [...e.dataTransfer.files]); };
   const onPaste = (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs[0]) setFile(fs[0], fs); };
-  document.addEventListener('paste', onPaste);
+  if (!wiz) document.addEventListener('paste', onPaste);
 
   if (initialFile) setFile(initialFile);
   const title = h('input', { type: 'text', value: it.title || '', placeholder: 'Optional title' });
   const source = h('input', { type: 'url', value: it.source || '', placeholder: 'https://… where you found it' });
   const note = h('textarea', { placeholder: 'Notes' }, it.note || '');
   const editors = hub.categories.map((c) => ({ c, ed: tagEditor(c, itemTags(it, c.id)) }));
-  const saveBtn = h('button', { class: 'btn primary' }, isNew ? 'Save reference' : 'Save changes');
+  const lastStep = wiz && opts.step === opts.total;
+  const saveLabel = wiz ? (lastStep ? 'Save & finish' : 'Save & next') : isNew ? 'Save reference' : 'Save changes';
+  const saveBtn = h('button', { class: 'btn primary' }, saveLabel);
   const done = () => { document.removeEventListener('paste', onPaste); closeModal(); };
 
   saveBtn.onclick = async () => {
@@ -251,13 +255,25 @@ function openEditor(existing, initialFile) {
       } else {
         await mutate((d) => { const t = d.items.find((x) => x.id === it.id); if (t) Object.assign(t, fields); }, 'Edit reference ' + (fields.title || it.id));
       }
-      done(); toast('Saved ✓');
-    } catch (e) { saveBtn.disabled = false; saveBtn.textContent = isNew ? 'Save reference' : 'Save changes'; if (e.message !== 'no token') toast('Save failed: ' + e.message, 4000); }
+      if (wiz) opts.onSaved(); else { done(); toast('Saved ✓'); }
+    } catch (e) { saveBtn.disabled = false; saveBtn.textContent = saveLabel; if (e.message !== 'no token') toast('Save failed: ' + e.message, 4000); }
   };
-  openModal(h('h2', {}, isNew ? 'Add reference' : 'Edit reference'), preview, drop, fileIn,
+  openModal(h('h2', {}, wiz ? `Add details — image ${opts.step} of ${opts.total}` : isNew ? 'Add reference' : 'Edit reference'), preview, drop, fileIn,
     h('label', {}, 'Title'), title, h('label', {}, 'Source link'), source, h('label', {}, 'Notes'), note,
     editors.map((x) => x.ed.el),
-    h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
+    wiz ? h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: opts.onSkip }, 'Skip image'), h('span', { class: 'spacer' }), h('button', { class: 'btn', onclick: opts.onStop }, 'Stop'))
+        : h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
+}
+
+function runWizard(files, shared) {
+  let i = 0, added = 0;
+  const finish = () => { closeModal(); toast(`Added ${added} of ${files.length}`, 3500); };
+  const next = () => {
+    if (i >= files.length) return finish();
+    const idx = ++i;
+    openEditor(null, files[idx - 1], { step: idx, total: files.length, tags: shared.tags, source: shared.source, onSaved: () => { added++; next(); }, onSkip: next, onStop: finish });
+  };
+  next();
 }
 
 function openBatch(files) {
@@ -299,8 +315,14 @@ function openBatch(files) {
       done(); toast(failed ? `Added ${added.length}, ${failed} failed` : `Added ${added.length} ✓`, 4000);
     } catch (e) { saveBtn.disabled = false; saveBtn.textContent = 'Retry'; toast('Save failed: ' + e.message, 4000); }
   };
+  const stepBtn = h('button', { class: 'btn', onclick: () => {
+    if (!list.length) return toast('No images selected');
+    const tags = {}; editors.forEach(({ c, ed }) => { const v = ed.get(); if (v.length) tags[c.id] = v; });
+    const fl = list.map((x) => x.f); list.forEach((x) => URL.revokeObjectURL(x.url));
+    runWizard(fl, { tags, source: source.value.trim() });
+  } }, 'Add details one by one →');
   openModal(h('h2', {}, 'Batch add'), count, grid, h('label', {}, 'Source link'), source, editors.map((x) => x.ed.el), bar,
-    h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
+    h('div', { class: 'row' }, saveBtn, stepBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
 }
 
 function openItem(id) {
