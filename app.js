@@ -226,6 +226,11 @@ function openEditor(existing, initial, opts = {}) {
   const gallery = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin-bottom:8px' });
   const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
   const drop = h('div', { class: 'drop', hidden: wiz });
+  const splitLink = h('button', { type: 'button', class: 'link', hidden: true, style: 'margin-top:6px', onclick: () => {
+    const files = imgs.map((x, i) => new File([x.blob], `photo${i + 1}.jpg`, { type: 'image/jpeg' }));
+    try { localStorage.setItem('refhub.batchMode', 'many'); } catch (e) {}
+    done(); openBatch(files);
+  } }, 'Make each photo its own design instead');
   const pill = 'position:absolute;background:#000b;color:#fff;border:0;border-radius:999px;font-size:12px;cursor:pointer;padding:2px 8px;';
   function drawImgs() {
     gallery.replaceChildren(...imgs.map((x, i) => {
@@ -236,7 +241,8 @@ function openEditor(existing, initial, opts = {}) {
           : h('button', { type: 'button', title: 'Make cover', style: pill + 'left:4px;bottom:4px', onclick: () => { imgs.unshift(imgs.splice(i, 1)[0]); drawImgs(); } }, '★ Cover'),
         h('button', { type: 'button', title: 'Remove', style: pill + 'right:4px;top:4px', onclick: () => { if (x.blob) URL.revokeObjectURL(x.url); imgs.splice(i, 1); drawImgs(); } }, '×'));
     }));
-    drop.textContent = imgs.length ? 'Add another angle — tap, drop or paste' : 'Tap to choose image(s), or drop / paste here';
+    drop.textContent = imgs.length ? '+ Add more photos' : '+ Add photos — tap to choose, or drop / paste';
+    splitLink.hidden = !(isNew && !wiz && imgs.length > 1);
   }
   async function addFiles(files) {
     const list = [...files].filter(isImg);
@@ -285,7 +291,7 @@ function openEditor(existing, initial, opts = {}) {
     } catch (e) { saveBtn.disabled = false; saveBtn.textContent = saveLabel; if (e.message !== 'no token') toast('Save failed: ' + e.message, 4000); }
   };
   openModal(h('h2', {}, wiz ? `Add details — image ${opts.step} of ${opts.total}` : isNew ? 'Add reference' : 'Edit reference'),
-    h('div', { class: 'help', style: 'margin-bottom:6px' }, 'Photos — add several angles of the same design. The first is the cover.'), gallery, drop, fileIn,
+    h('div', { class: 'help', style: 'margin-bottom:6px' }, 'Photos — add several angles of the same design. The first is the cover.'), gallery, drop, fileIn, splitLink,
     h('label', {}, 'Title'), title, h('label', {}, 'Source link'), source, h('label', {}, 'Notes'), note,
     editors.map((x) => x.ed.el),
     wiz ? h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: opts.onSkip }, 'Skip image'), h('span', { class: 'spacer' }), h('button', { class: 'btn', onclick: opts.onStop }, 'Stop'))
@@ -472,7 +478,7 @@ function handleFiles(files) {
   const imgs = [...files].filter(isImg);
   if (!imgs.length) return toast(`Not an image I can read: ${[...files].map((f) => f.name || f.type).join(', ') || 'nothing received'}`, 5000);
   if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
-  imgs.length > 1 ? openBatch(imgs) : openEditor(null, [imgs[0]]);
+  openEditor(null, imgs);
 }
 // Images dragged from another web page arrive as a URL, not a file.
 async function handleDropData(dt) {
