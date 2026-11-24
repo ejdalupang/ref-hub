@@ -216,7 +216,7 @@ function openEditor(existing, initialFile) {
     if (isNew && all && all.filter((x) => x.type.startsWith('image/')).length > 1) { document.removeEventListener('paste', onPaste); return openBatch(all.filter((x) => x.type.startsWith('image/'))); }
     if (!f || !f.type.startsWith('image/')) return;
     drop.textContent = 'Processing…';
-    blob = await toJpegBlob(f);
+    try { blob = await toJpegBlob(f); } catch (e) { drop.textContent = 'Could not read that image (HEIC isn’t supported in this browser — export as JPG/PNG)'; return; }
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     previewUrl = URL.createObjectURL(blob);
     preview.src = previewUrl; preview.hidden = false; drop.textContent = 'Change image';
@@ -388,8 +388,9 @@ document.body.append(dropHint);
 let dragDepth = 0;
 const hasDrag = (e) => { const t = [...(e.dataTransfer?.types || [])]; return t.includes('Files') || t.includes('text/uri-list') || t.includes('text/html'); };
 function handleFiles(files) {
-  const imgs = [...files].filter((f) => f.type.startsWith('image/'));
-  if (!imgs.length) return toast('Those aren’t images');
+  const isImg = (f) => f.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|avif|bmp|heic|heif|svg)$/i.test(f.name);
+  const imgs = [...files].filter(isImg);
+  if (!imgs.length) return toast(`Not an image I can read: ${[...files].map((f) => f.name || f.type).join(', ') || 'nothing received'}`, 5000);
   if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
   imgs.length > 1 ? openBatch(imgs) : openEditor(null, imgs[0]);
 }
@@ -412,6 +413,7 @@ window.addEventListener('dragleave', (e) => { if (hasDrag(e) && dragDepth > 0 &&
 window.addEventListener('dragover', (e) => { if (hasDrag(e)) e.preventDefault(); });
 window.addEventListener('drop', (e) => {
   if (!hasDrag(e)) return;
+  console.log('[ref-hub] drop', e.dataTransfer.types, e.dataTransfer.files.length);
   e.preventDefault(); dragDepth = 0; dropHint.hidden = true;
   if ($('#modal').hidden) handleDropData(e.dataTransfer);
 });
