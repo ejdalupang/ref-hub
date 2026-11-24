@@ -60,7 +60,11 @@ async function putFile(path, contentB64, message, sha) {
     method: 'PUT', headers: { ...headers(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, content: contentB64, branch: cfg.branch, ...(sha ? { sha } : {}) }),
   });
-  if (!r.ok) { const e = new Error('GitHub ' + r.status); e.status = r.status; throw e; }
+  if (!r.ok) {
+    const e = new Error('GitHub ' + r.status); e.status = r.status;
+    if (r.status === 403) openSettings('GitHub says this token can’t write to the repo (403). Edit the token at github.com/settings/personal-access-tokens: select the ref-hub repo and set Contents to Read and write, then try again.');
+    throw e;
+  }
   return r.json();
 }
 async function deleteFile(path, message) {
