@@ -204,7 +204,7 @@ async function toJpegBlob(file, max = 1600) {
 }
 const blobToB64 = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(blob); });
 
-function openEditor(existing) {
+function openEditor(existing, initialFile) {
   if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
   let blob = null, previewUrl = null;
   const isNew = !existing;
@@ -229,6 +229,7 @@ function openEditor(existing) {
   const onPaste = (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs[0]) setFile(fs[0], fs); };
   document.addEventListener('paste', onPaste);
 
+  if (initialFile) setFile(initialFile);
   const title = h('input', { type: 'text', value: it.title || '', placeholder: 'Optional title' });
   const source = h('input', { type: 'url', value: it.source || '', placeholder: 'https://… where you found it' });
   const note = h('textarea', { placeholder: 'Notes' }, it.note || '');
@@ -380,3 +381,26 @@ $('#menuBtn').onclick = () => toggleSide(!side.classList.contains('open'));
 scrim.onclick = () => toggleSide(false);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && remote && $('#modal').hidden) load(); });
 load();
+
+// ---------- drag & drop / paste anywhere on the page ----------
+const dropHint = h('div', { style: 'position:fixed;inset:12px;z-index:40;border:3px dashed var(--accent);border-radius:20px;background:#0008;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;pointer-events:none', hidden: true }, 'Drop images to add them');
+document.body.append(dropHint);
+let dragDepth = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+function handleFiles(files) {
+  const imgs = [...files].filter((f) => f.type.startsWith('image/'));
+  if (!imgs.length) return toast('Those aren’t images');
+  if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
+  imgs.length > 1 ? openBatch(imgs) : openEditor(null, imgs[0]);
+}
+window.addEventListener('dragenter', (e) => { if (hasFiles(e) && $('#modal').hidden) { dragDepth++; dropHint.hidden = false; } });
+window.addEventListener('dragleave', (e) => { if (hasFiles(e) && dragDepth > 0 && --dragDepth === 0) dropHint.hidden = true; });
+window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); dragDepth = 0; dropHint.hidden = true;
+  if ($('#modal').hidden) handleFiles(e.dataTransfer.files);
+});
+document.addEventListener('paste', (e) => {
+  if ($('#modal').hidden && !/INPUT|TEXTAREA/.test(document.activeElement?.tagName) && e.clipboardData?.files?.length) handleFiles(e.clipboardData.files);
+});
