@@ -116,6 +116,7 @@ async function mutate(fn, message) {
 }
 
 // ---------- helpers ----------
+const itemImages = (it) => (it.images && it.images.length ? it.images : it.image ? [it.image] : []);
 const catById = (id) => hub.categories.find((c) => c.id === id);
 const itemTags = (it, cid) => (it.tags && it.tags[cid]) || [];
 function toast(msg, ms = 2500) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), ms); }
@@ -159,10 +160,11 @@ function render() {
   const shown = hub.items.filter(matches).sort((a, b) => (b.added || '').localeCompare(a.added || ''));
   const g = $('#grid'); g.replaceChildren();
   for (const it of shown) {
-    const img = h('img', { src: it.image, alt: it.title || '', loading: 'lazy' });
-    imgSrcFallback(img, it.image);
+    const pics = itemImages(it);
+    const img = h('img', { src: pics[0], alt: it.title || '', loading: 'lazy' });
+    imgSrcFallback(img, pics[0]);
     const tags = hub.categories.flatMap((c) => itemTags(it, c.id).map((v) => h('span', { class: 'tag', style: `--c:${c.color}` }, v)));
-    g.append(h('div', { class: 'card', onclick: () => openItem(it.id) }, img,
+    g.append(h('div', { class: 'card', onclick: () => openItem(it.id) }, img, pics.length > 1 && h('span', { class: 'badge' }, '▣ ' + pics.length),
       (it.title || tags.length) ? h('div', { class: 'meta' }, it.title && h('div', { class: 't' }, it.title), tags.length && h('div', { class: 'tags' }, tags)) : null));
   }
   const filtering = query || Object.values(sel).some((s) => s.size);
@@ -213,33 +215,49 @@ async function toJpegBlob(file, max = 1600) {
 const blobToB64 = (blob) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.readAsDataURL(blob); });
 
 const isImg = (f) => f.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|avif|bmp|heic|heif|svg)$/i.test(f.name);
-function openEditor(existing, initialFile, opts = {}) {
+function openEditor(existing, initial, opts = {}) {
   if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
-  let blob = null, previewUrl = null;
-  const isNew = !existing;
-  const wiz = !!opts.total;
+  const isNew = !existing, wiz = !!opts.total;
   const it = existing || { tags: opts.tags ? JSON.parse(JSON.stringify(opts.tags)) : {}, source: opts.source || '' };
-  const preview = h('img', { class: 'preview', hidden: isNew, src: isNew ? '' : it.image });
-  const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: isNew, hidden: true });
-  const drop = h('div', { class: 'drop', hidden: wiz }, 'Tap to choose image(s) — select several for a batch — or drop / paste here');
-  async function setFile(f, all) {
-    if (isNew && !wiz && all && all.filter(isImg).length > 1) { document.removeEventListener('paste', onPaste); return openBatch(all.filter(isImg)); }
-    if (!f || !isImg(f)) return;
+  const newId = uid();
+  let imgs = existing ? itemImages(existing).map((path) => ({ path, url: path })) : [];
+  const origPaths = imgs.map((x) => x.path);
+
+  const gallery = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin-bottom:8px' });
+  const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+  const drop = h('div', { class: 'drop', hidden: wiz });
+  const pill = 'position:absolute;background:#000b;color:#fff;border:0;border-radius:999px;font-size:12px;cursor:pointer;padding:2px 8px;';
+  function drawImgs() {
+    gallery.replaceChildren(...imgs.map((x, i) => {
+      const im = h('img', { src: x.url, style: 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block;background:var(--chip)' });
+      if (x.path) imgSrcFallback(im, x.path);
+      return h('div', { style: 'position:relative' }, im,
+        i === 0 ? h('span', { style: pill + 'left:4px;bottom:4px' }, 'Cover')
+          : h('button', { type: 'button', title: 'Make cover', style: pill + 'left:4px;bottom:4px', onclick: () => { imgs.unshift(imgs.splice(i, 1)[0]); drawImgs(); } }, '★ Cover'),
+        h('button', { type: 'button', title: 'Remove', style: pill + 'right:4px;top:4px', onclick: () => { if (x.blob) URL.revokeObjectURL(x.url); imgs.splice(i, 1); drawImgs(); } }, '×'));
+    }));
+    drop.textContent = imgs.length ? 'Add another angle — tap, drop or paste' : 'Tap to choose image(s), or drop / paste here';
+  }
+  async function addFiles(files) {
+    const list = [...files].filter(isImg);
+    if (!list.length) return;
     drop.textContent = 'Processing…';
-    try { blob = await toJpegBlob(f); } catch (e) { drop.textContent = 'Could not read that image (HEIC isn’t supported in this browser — export as JPG/PNG)'; return; }
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = URL.createObjectURL(blob);
-    preview.src = previewUrl; preview.hidden = false; drop.textContent = 'Change image';
+    for (const f of list) {
+      try { const blob = await toJpegBlob(f); imgs.push({ blob, url: URL.createObjectURL(blob) }); }
+      catch (e) { toast('Could not read ' + (f.name || 'an image') + ' (HEIC isn’t supported here — export as JPG/PNG)', 4000); }
+    }
+    drawImgs();
   }
   drop.onclick = () => fileIn.click();
-  fileIn.onchange = () => setFile(fileIn.files[0], [...fileIn.files]);
+  fileIn.onchange = () => { addFiles(fileIn.files); fileIn.value = ''; };
   drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
   drop.ondragleave = () => drop.classList.remove('over');
-  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); setFile(e.dataTransfer.files[0], [...e.dataTransfer.files]); };
-  const onPaste = (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs[0]) setFile(fs[0], fs); };
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); addFiles(e.dataTransfer.files); };
+  const onPaste = (e) => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) addFiles(fs); };
   if (!wiz) document.addEventListener('paste', onPaste);
+  drawImgs();
+  if (initial) addFiles(Array.isArray(initial) ? initial : [initial]);
 
-  if (initialFile) setFile(initialFile);
   const title = h('input', { type: 'text', value: it.title || '', placeholder: 'Optional title' });
   const source = h('input', { type: 'url', value: it.source || '', placeholder: 'https://… where you found it' });
   const note = h('textarea', { placeholder: 'Notes' }, it.note || '');
@@ -247,26 +265,27 @@ function openEditor(existing, initialFile, opts = {}) {
   const lastStep = wiz && opts.step === opts.total;
   const saveLabel = wiz ? (lastStep ? 'Save & finish' : 'Save & next') : isNew ? 'Save reference' : 'Save changes';
   const saveBtn = h('button', { class: 'btn primary' }, saveLabel);
-  const done = () => { document.removeEventListener('paste', onPaste); closeModal(); };
+  const done = () => { document.removeEventListener('paste', onPaste); imgs.forEach((x) => x.blob && URL.revokeObjectURL(x.url)); closeModal(); };
 
   saveBtn.onclick = async () => {
-    if (isNew && !blob) return toast('Choose an image first');
+    if (!imgs.length) return toast('Add at least one image');
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
     try {
       const tags = {};
       editors.forEach(({ c, ed }) => { const v = ed.get(); if (v.length) tags[c.id] = v; });
-      const fields = { title: title.value.trim(), source: source.value.trim(), note: note.value.trim(), tags };
-      if (isNew) {
-        const id = uid(); const path = `images/${id}.jpg`;
-        await putFile(path, await blobToB64(blob), 'Add image ' + id);
-        await mutate((d) => d.items.push({ id, image: path, added: new Date().toISOString(), ...fields }), 'Add reference ' + (fields.title || id));
-      } else {
-        await mutate((d) => { const t = d.items.find((x) => x.id === it.id); if (t) Object.assign(t, fields); }, 'Edit reference ' + (fields.title || it.id));
+      for (const x of imgs) {            // upload new photos (kept on x.path so a retry doesn't re-upload)
+        if (!x.path) { const path = `images/${uid()}.jpg`; await putFile(path, await blobToB64(x.blob), 'Add image'); x.path = path; }
       }
+      const paths = imgs.map((x) => x.path);
+      const fields = { title: title.value.trim(), source: source.value.trim(), note: note.value.trim(), tags, images: paths, image: paths[0] };
+      if (isNew) await mutate((d) => { if (!d.items.some((x) => x.id === newId)) d.items.push({ id: newId, added: new Date().toISOString(), ...fields }); }, 'Add reference ' + (fields.title || newId));
+      else await mutate((d) => { const t = d.items.find((x) => x.id === it.id); if (t) Object.assign(t, fields); }, 'Edit reference ' + (fields.title || it.id));
+      for (const gone of origPaths.filter((pth) => !paths.includes(pth))) { try { await deleteFile(gone, 'Remove image'); } catch (e) {} }
       if (wiz) opts.onSaved(); else { done(); toast('Saved ✓'); }
     } catch (e) { saveBtn.disabled = false; saveBtn.textContent = saveLabel; if (e.message !== 'no token') toast('Save failed: ' + e.message, 4000); }
   };
-  openModal(h('h2', {}, wiz ? `Add details — image ${opts.step} of ${opts.total}` : isNew ? 'Add reference' : 'Edit reference'), preview, drop, fileIn,
+  openModal(h('h2', {}, wiz ? `Add details — image ${opts.step} of ${opts.total}` : isNew ? 'Add reference' : 'Edit reference'),
+    h('div', { class: 'help', style: 'margin-bottom:6px' }, 'Photos — add several angles of the same design. The first is the cover.'), gallery, drop, fileIn,
     h('label', {}, 'Title'), title, h('label', {}, 'Source link'), source, h('label', {}, 'Notes'), note,
     editors.map((x) => x.ed.el),
     wiz ? h('div', { class: 'row' }, saveBtn, h('button', { class: 'btn', onclick: opts.onSkip }, 'Skip image'), h('span', { class: 'spacer' }), h('button', { class: 'btn', onclick: opts.onStop }, 'Stop'))
@@ -329,18 +348,35 @@ function openBatch(files) {
     const fl = list.map((x) => x.f); list.forEach((x) => URL.revokeObjectURL(x.url));
     runWizard(fl, { tags, source: source.value.trim() });
   } }, 'Add details one by one →');
+  const combineBtn = h('button', { class: 'btn', onclick: () => {
+    if (!list.length) return toast('No images selected');
+    const tags = {}; editors.forEach(({ c, ed }) => { const v = ed.get(); if (v.length) tags[c.id] = v; });
+    const fl = list.map((x) => x.f); list.forEach((x) => URL.revokeObjectURL(x.url));
+    openEditor(null, fl, { tags, source: source.value.trim() });
+  } }, 'Combine into one design');
   openModal(h('h2', {}, 'Batch add'), count, grid, h('label', {}, 'Source link'), source, editors.map((x) => x.ed.el), bar,
-    h('div', { class: 'row' }, saveBtn, stepBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
+    h('div', { class: 'row' }, saveBtn, stepBtn, combineBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
 }
 
 function openItem(id) {
   const it = hub.items.find((x) => x.id === id); if (!it) return;
-  const img = h('img', { class: 'preview', src: it.image }); imgSrcFallback(img, it.image);
+  const pics = itemImages(it); let cur = 0;
+  const img = h('img', { class: 'preview', src: pics[0], style: pics.length > 1 ? 'cursor:pointer' : '' }); imgSrcFallback(img, pics[0]);
+  const thumbs = h('div', { style: 'display:flex;gap:6px;margin-top:8px;overflow-x:auto' });
+  function show(i) {
+    cur = (i + pics.length) % pics.length; delete img.dataset.fb; img.src = pics[cur]; imgSrcFallback(img, pics[cur]);
+    [...thumbs.children].forEach((t, j) => (t.style.outline = j === cur ? '2px solid var(--accent)' : 'none'));
+  }
+  if (pics.length > 1) {
+    img.onclick = () => show(cur + 1);
+    pics.forEach((pth, j) => { const t = h('img', { src: pth, style: 'width:64px;height:64px;object-fit:cover;border-radius:6px;cursor:pointer;flex:none', onclick: () => show(j) }); imgSrcFallback(t, pth); thumbs.append(t); });
+    show(0);
+  }
   const tagRows = hub.categories.filter((c) => itemTags(it, c.id).length).map((c) =>
     h('div', { style: 'margin-top:10px' }, h('div', { class: 'help' }, c.name), h('div', { class: 'chips', style: 'margin-top:4px' }, itemTags(it, c.id).map((v) => h('span', { class: 'tag', style: `--c:${c.color};font-size:13px;padding:2px 10px;cursor:pointer`, onclick: () => { closeModal(); Object.values(sel).forEach((s) => s.clear()); sel[c.id].add(v); render(); window.scrollTo(0, 0); } }, v)))));
   let srcLink = null;
   try { if (it.source && /^https?:$/.test(new URL(it.source).protocol)) srcLink = h('a', { href: it.source, target: '_blank', rel: 'noopener noreferrer' }, new URL(it.source).hostname); } catch (e) {}
-  openModal(img, h('h2', { style: 'margin-top:14px' }, it.title || 'Untitled'),
+  openModal(img, pics.length > 1 && thumbs, h('h2', { style: 'margin-top:14px' }, it.title || 'Untitled'),
     srcLink && h('div', { class: 'help' }, 'Source: ', srcLink), it.note && h('p', {}, it.note), tagRows,
     h('div', { class: 'row' },
       h('button', { class: 'btn primary', onclick: () => openEditor(it) }, 'Edit'),
@@ -348,7 +384,7 @@ function openItem(id) {
         if (!cfg.token) return openSettings('Add a GitHub token to delete.');
         if (!confirm('Delete this reference permanently?')) return;
         e.target.disabled = true;
-        try { await mutate((d) => { d.items = d.items.filter((x) => x.id !== id); }, 'Delete reference ' + id); await deleteFile(it.image, 'Delete image ' + id); closeModal(); toast('Deleted'); }
+        try { await mutate((d) => { d.items = d.items.filter((x) => x.id !== id); }, 'Delete reference ' + id); for (const pth of pics) { try { await deleteFile(pth, 'Delete image'); } catch (e2) {} } closeModal(); toast('Deleted'); }
         catch (err) { e.target.disabled = false; if (err.message !== 'no token') toast('Delete failed: ' + err.message, 4000); }
       } }, 'Delete'),
       h('span', { class: 'spacer' }), h('button', { class: 'btn', onclick: closeModal }, 'Close')));
@@ -422,7 +458,7 @@ function handleFiles(files) {
   const imgs = [...files].filter(isImg);
   if (!imgs.length) return toast(`Not an image I can read: ${[...files].map((f) => f.name || f.type).join(', ') || 'nothing received'}`, 5000);
   if (!cfg.token) return openSettings('Add a GitHub token first so the Hub can save to your repo.');
-  imgs.length > 1 ? openBatch(imgs) : openEditor(null, imgs[0]);
+  imgs.length > 1 ? openBatch(imgs) : openEditor(null, [imgs[0]]);
 }
 // Images dragged from another web page arrive as a URL, not a file.
 async function handleDropData(dt) {
