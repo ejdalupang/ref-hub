@@ -308,7 +308,7 @@ function openBatch(files) {
   const grid = h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-top:8px' });
   const count = h('div', { class: 'help' });
   function drawThumbs() {
-    count.textContent = `${list.length} image${list.length === 1 ? '' : 's'} — the tags below apply to all of them`;
+    count.textContent = `${list.length} image${list.length === 1 ? '' : 's'} selected`;
     grid.replaceChildren(...list.map((x) => h('div', { style: 'position:relative' },
       h('img', { src: x.url, style: 'width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block' }),
       h('button', { class: 'icon-btn', style: 'position:absolute;top:2px;right:2px;background:#000a;color:#fff;border-radius:50%;width:22px;height:22px;font-size:13px;padding:0', onclick: () => { list = list.filter((y) => y !== x); drawThumbs(); } }, '×'))));
@@ -354,8 +354,22 @@ function openBatch(files) {
     const fl = list.map((x) => x.f); list.forEach((x) => URL.revokeObjectURL(x.url));
     openEditor(null, fl, { tags, source: source.value.trim() });
   } }, 'Combine into one design');
-  openModal(h('h2', {}, 'Batch add'), count, grid, h('label', {}, 'Source link'), source, editors.map((x) => x.ed.el), bar,
-    h('div', { class: 'row' }, saveBtn, stepBtn, combineBtn, h('button', { class: 'btn', onclick: done }, 'Cancel')));
+  let mode = 'one';
+  try { mode = localStorage.getItem('refhub.batchMode') || 'one'; } catch (e) {}
+  const seg = h('div', { style: 'display:flex;gap:6px;margin:10px 0 4px' });
+  const actions = h('div', { class: 'row' });
+  const hint = h('div', { class: 'help' });
+  function drawMode() {
+    try { localStorage.setItem('refhub.batchMode', mode); } catch (e) {}
+    seg.replaceChildren(
+      h('button', { class: 'btn' + (mode === 'one' ? ' primary' : ''), onclick: () => { mode = 'one'; drawMode(); } }, 'One design (angles)'),
+      h('button', { class: 'btn' + (mode === 'many' ? ' primary' : ''), onclick: () => { mode = 'many'; drawMode(); } }, 'Separate designs'));
+    hint.textContent = mode === 'one' ? 'All photos go into a single design — e.g. front, back and side views of the same piece.' : 'Each photo becomes its own design. Tags below apply to every one.';
+    combineBtn.className = 'btn primary'; combineBtn.textContent = 'Continue →';
+    actions.replaceChildren(...(mode === 'one' ? [combineBtn] : [saveBtn, stepBtn]), h('button', { class: 'btn', onclick: done }, 'Cancel'));
+  }
+  drawMode();
+  openModal(h('h2', {}, 'Add photos'), count, grid, seg, hint, h('label', {}, 'Source link'), source, editors.map((x) => x.ed.el), bar, actions);
 }
 
 function openItem(id) {
